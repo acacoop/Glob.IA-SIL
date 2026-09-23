@@ -1,0 +1,109 @@
+ 
+ logDate = logDate.HasValue ? logDate.Value.ToUniversalTime() : DateTimeOffset.UtcNow;
+ CodeConst.EventType.ExpiredPoints.Code,
+ CodeConst.EventType.ExpiredPoints.Name
+ var customerPointsLog = new CustomerPointsLog
+      {
+        LogDate = (DateTimeOffset)logDate,
+        Note = note,
+        Points = pointsToAssign,
+        EventTypeCode = eventTypeCode,
+        CustomerId = customerId,
+      };
+	  
+	  
+	  
+          //DataTable CustomerPointLogDT = new DataTable();
+          //CustomerPointLogDT.Columns.Add("CustomerId");
+          //CustomerPointLogDT.Columns.Add("Points");
+          //CustomerPointLogDT.Columns.Add("LogDate");
+          //CustomerPointLogDT.Columns.Add("EventTypeCode");
+          //CustomerPointLogDT.Columns.Add("Note");
+
+customer point log last id : 63216530
+
+
+viernes
+caducar puntos
+bussines. spec
+foda
+
+procesop despliegue
+fallas clubsite
+caducar
+
+lunes------
+meet por proceso de despliegue
+fallas club site
+
+Gaspar viendo ETL (SURVEYRESPONSE)
+Gaston - TO PRODUCCION - TASK que no reesquedulearon
+CADUCAR
+
+
+
+MARTES-----
+SQUAD
+syncro loyalty paraguay
+
+syncro SML
+metodlogias
+EMBLUE
+
+----------MIERCOLES
+
+FALLAS CLUB -RAUL JOEL
+ERRORES DE TASK EN PROD- CATALOG
+
+ANALISIS CLUB -RAUL Y GASPAR
+CADUCAR
+
+
+--jueves
+raul- temas de loyalty ngral
+jaquie - customer pending affiliate
+gaspar - caducar puntos- envmio de mail al finalizar el proceso
+fran - null reference en el musetreo de encuestas(en prod)
+
+---VIERNES
+meet pos daily- meet DW access
+validar cambios de fran en el templeate (survey)
+caducar
+
+---lunes 
+meet cony y jaquie
+analisis SML - gaspar y raul
+caducar
+
+--martes
+validar joel catalog
+meet a kas 10 - squad
+nico - eventypecode
+incosistencias website de produccion 
+caducar
+
+--miercoles
+concluir caducar
+jaqui valida liberacion dni
+meet con devs
+
+130101259949
+VEP: 993680841
+
+
+
+
+/*renault*/
+0810-888-4000 (adnibstracion/legales/dias/licitacion) hasta 17:30 hs
+
+	
+	
+	VER COMO ORGANIZAMO RAMAS DEL REPO PARA CUANDO TRABAJEMOS CON 2 METODOLOGIAS A LA VEZ
+	System.ArgumentException: 'No puede establecer el valor de Column 'InvalidateDate' en null. Utilice DBNull en su lugar.'
+	
+	11050261
+	25816
+	
+	
+	
+	J0gT724LIk2GICspzVmiDA==

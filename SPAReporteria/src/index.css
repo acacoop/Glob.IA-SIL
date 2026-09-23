@@ -1,0 +1,35 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Rayas en filas impares (incluye columna de grano) */
+.turnos-table-striped .ant-table-row-striped-odd {
+  background-color: #fafafa;
+}
+
+/* Hover en toda la fila */
+.turnos-table-striped .ant-table-tbody > tr:hover > td {
+  background-color: #c4c1c1 !important;
+  color: white;
+}
+
+/* Hover específico en celdas clicables */
+.turnos-table-striped .ant-table-cell:hover {
+  font-weight: bold;
+  background-color: #e1f5fe !important;
+  color: inherit;
+}
+
+.turnos-table-striped .ant-table-thead::after {
+  display: none !important;
+}

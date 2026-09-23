@@ -1,0 +1,97 @@
+{
+  "type": "excel",
+  "format": "xlsx",
+  "name": "Cupos",
+  "report": {
+    "whereStatementConditional": true,
+    "properties": [
+      {
+        "property": "NomVendSIL",
+        "title": "Vendedor"
+      },
+      {
+        "property": "NomCompSIL",
+        "title": "Comprador"
+      },
+      {
+        "property": "Alfanumerico",
+        "title": "Alfanumérico"
+      },
+      {
+        "property": "Fecha",
+        "title": "Fecha",
+        "type" : "Date"
+      },
+      {
+        "property": "CTG",
+        "title": "CTG"
+      },
+      {
+        "selectStatement": "CASE EstadoSTOP WHEN 0 THEN 'Sin CTG' WHEN 1 THEN 'Activado' WHEN 2 THEN 'Arribado' WHEN 3 THEN 'Descargado' WHEN 4 THEN 'Desviado' WHEN 5 THEN 'Rechazado' WHEN 6 THEN 'Anulado' ELSE '' END AS EstadoSTOP",
+        "property": "EstadoSTOP",
+        "title": "Estado STOP"
+      },
+      {
+        "property": "NomGrano",
+        "title": "Grano"
+      },
+      {
+        "property": "NomTitularDeCCPP",
+        "title": "Titular de CCPP"
+      },
+      {
+        "property": "NomRteComProductor",
+        "title": "Rte. Com Productor"
+      },
+      {
+        "property": "NomRteComVtaPrimaria",
+        "title": "Rte. Com Vta. Primaria"
+      },
+      {
+        "property": "NomRteComVtaSecundaria",
+        "title": "Rte. Com Vta. Secundaria"
+      },
+      {
+        "property": "NomRteComVtaSecundaria2",
+        "title": "Rte. Com Vta. Secundaria 2"
+      },
+      {
+        "property": "NomMercATermino",
+        "title": "Merc. A Término"
+      },
+      {
+        "property": "NomCorVtaPrimaria",
+        "title": "Cor. Vta. Primaria"
+      },
+      {
+        "property": "NomCorVtaSecundaria",
+        "title": "Cor. Vta. Secundaria"
+      },
+      {
+        "property": "NomDestino",
+        "title": "Destino"
+      },
+      {
+        "property": "NomDestinatario",
+        "title": "Destinatario"
+      },
+      {
+        "selectStatement": "CASE EstadoSIL WHEN 0 THEN 'Pendiente de Distribuir' WHEN 1 THEN '' WHEN 2 THEN '' WHEN 3 THEN 'Anulado' WHEN 4 THEN 'Distribuido' WHEN 5 THEN 'Distribuido' ELSE '' END AS EstadoSIL",
+        "property": "EstadoSIL",
+        "title": "Estado SIL"
+      },
+      {
+        "property": "CentroDist",
+        "title": "Centro Distribución"
+      },
+      {
+        "property": "CentroCupo",
+        "title": "Centro"
+      },
+      {
+        "property": "ObservacionSIL",
+        "title": "Observación"
+      }
+    ]
+  }
+}
