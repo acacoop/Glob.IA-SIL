@@ -4,6 +4,7 @@ using Oracle.ManagedDataAccess.Client;
 using SILData.DataAccess.Map_OracleToSql;
 using SILData.Model;
 using SILData.Model.SolicitudTurno;
+using SILData.Services;
 using SILData.SilDataExceptions;
 using System.Collections.Generic;
 using System.Data;
@@ -37,11 +38,21 @@ namespace SILData.DataAccess
 
         string queryLocation = Path.Combine(executableLocation, queryPath);
 
-        if (!File.Exists(queryLocation))
-          throw new Exception(
-            $"No se encontró el archivo de query en: {queryLocation}");
+        bool sqlFileCache = FeatureFlags.IsEnabled(_configuration, FeatureFlags.SqlFileCache);
+        string query;
+        if (sqlFileCache)
+        {
+          query = SqlFileCache.GetOrLoad(queryLocation,
+            () => new Exception($"No se encontró el archivo de query en: {queryLocation}"));
+        }
+        else
+        {
+          if (!File.Exists(queryLocation))
+            throw new Exception(
+              $"No se encontró el archivo de query en: {queryLocation}");
 
-        string query = await File.ReadAllTextAsync(queryLocation);
+          query = await File.ReadAllTextAsync(queryLocation);
+        }
 
         var dictionary = new Dictionary<string, object>
         {
@@ -52,8 +63,15 @@ namespace SILData.DataAccess
           { "@zona",           zonaGeografica }
         };
 
-        SqlMapper.AddTypeHandler(new BooleanTypeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        if (sqlFileCache)
+        {
+          SqlFileCache.EnsureTypeHandlersRegistered(_logger);
+        }
+        else
+        {
+          SqlMapper.AddTypeHandler(new BooleanTypeHandler());
+          SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        }
 
         using OracleConnection connection = new OracleConnection(
           _configuration.GetConnectionString("SilConnection"));
@@ -102,11 +120,21 @@ namespace SILData.DataAccess
 
         string queryLocation = Path.Combine(executableLocation, queryPath);
 
-        if (!File.Exists(queryLocation))
-          throw new Exception(
-            $"No se encontró el archivo de query en: {queryLocation}");
+        bool sqlFileCache = FeatureFlags.IsEnabled(_configuration, FeatureFlags.SqlFileCache);
+        string query;
+        if (sqlFileCache)
+        {
+          query = SqlFileCache.GetOrLoad(queryLocation,
+            () => new Exception($"No se encontró el archivo de query en: {queryLocation}"));
+        }
+        else
+        {
+          if (!File.Exists(queryLocation))
+            throw new Exception(
+              $"No se encontró el archivo de query en: {queryLocation}");
 
-        string query = await File.ReadAllTextAsync(queryLocation);
+          query = await File.ReadAllTextAsync(queryLocation);
+        }
 
         var dictionary = new Dictionary<string, object>
         {
@@ -116,8 +144,15 @@ namespace SILData.DataAccess
           { "@grano",      cuposCorreFilter.Grano }
         };
 
-        SqlMapper.AddTypeHandler(new BooleanTypeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        if (sqlFileCache)
+        {
+          SqlFileCache.EnsureTypeHandlersRegistered(_logger);
+        }
+        else
+        {
+          SqlMapper.AddTypeHandler(new BooleanTypeHandler());
+          SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        }
 
         using OracleConnection connection = new OracleConnection(
           _configuration.GetConnectionString("SilConnection"));
@@ -165,11 +200,21 @@ namespace SILData.DataAccess
 
         string queryLocation = Path.Combine(executableLocation, queryPath);
 
-        if (!File.Exists(queryLocation))
-          throw new Exception(
-            $"No se encontró el archivo de query en: {queryLocation}");
+        bool sqlFileCache = FeatureFlags.IsEnabled(_configuration, FeatureFlags.SqlFileCache);
+        string query;
+        if (sqlFileCache)
+        {
+          query = SqlFileCache.GetOrLoad(queryLocation,
+            () => new Exception($"No se encontró el archivo de query en: {queryLocation}"));
+        }
+        else
+        {
+          if (!File.Exists(queryLocation))
+            throw new Exception(
+              $"No se encontró el archivo de query en: {queryLocation}");
 
-        string query = await File.ReadAllTextAsync(queryLocation);
+          query = await File.ReadAllTextAsync(queryLocation);
+        }
 
         var dictionary = new Dictionary<string, object>
         {
@@ -180,8 +225,15 @@ namespace SILData.DataAccess
             { "@producto",        codigoGrano },
             { "@zona",            zonaGeografica }
         };
-        SqlMapper.AddTypeHandler(new BooleanTypeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        if (sqlFileCache)
+        {
+          SqlFileCache.EnsureTypeHandlersRegistered(_logger);
+        }
+        else
+        {
+          SqlMapper.AddTypeHandler(new BooleanTypeHandler());
+          SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        }
         using OracleConnection connection = new OracleConnection(
             _configuration.GetConnectionString("SilConnection"));
         await connection.OpenAsync();

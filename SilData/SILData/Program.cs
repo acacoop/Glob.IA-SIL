@@ -92,6 +92,11 @@ builder.Services.AddAuthentication("Bearer")
 builder.Services.AddScoped<IDataService, DataService>();
 builder.Services.AddAutoMapper(typeof(AutoMapperProfile));
 
+// Caché de catálogos (puerto→zonas, nombres de vendedor). Sólo se usa si
+// Features:CatalogCache=true; con el flag apagado no se consulta.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ICatalogCache, CatalogCache>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

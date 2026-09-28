@@ -71,6 +71,32 @@ namespace SILData.Services
     }
 
     /// <summary>
+    /// Variante para <see cref="ICatalogCache"/> (flag <c>Features:CatalogCache</c>):
+    /// mismo resultado que <see cref="ResolverNombresVendedorAsync"/> pero
+    /// PROPAGA la excepción (para no cachear un error como "desconocido") y
+    /// consulta en lotes de 900 para no superar el límite de 1000 del IN.
+    /// </summary>
+    public async Task<Dictionary<long, string>> FetchNombresVendedorAsync(IReadOnlyCollection<long> cuentas)
+    {
+      var resultado = new Dictionary<long, string>();
+      if (cuentas is null || cuentas.Count == 0) return resultado;
+
+      var store = new VendedorStore(MakeConfiguration(), BuildStoreLogger<VendedorStore>());
+      var service = new AccountService(store);
+      foreach (var lote in cuentas.Chunk(900))
+      {
+        var rows = await service.GetVendedoresByCuentas(lote);
+        foreach (var g in rows
+          .Where(r => r is not null && !string.IsNullOrWhiteSpace(r.Nombre))
+          .GroupBy(r => r.Cuenta))
+        {
+          resultado.TryAdd(g.Key, g.First().Nombre);
+        }
+      }
+      return resultado;
+    }
+
+    /// <summary>
     /// Helper estático: busca el nombre de un código numérico en el map
     /// devuelto por <see cref="ResolverNombresVendedorAsync"/>. Devuelve
     /// null si el cupo no trae código o si el catálogo no lo conoce.
@@ -88,7 +114,7 @@ namespace SILData.Services
     /// Los códigos vacíos o no numéricos quedan fuera (la UI los trata
     /// como "No informado" sin gastar una query en el catálogo).
     /// </summary>
-    private static HashSet<long> ParseCuentas(IEnumerable<string?> codigos)
+    internal static HashSet<long> ParseCuentas(IEnumerable<string?> codigos)
     {
       var cuentas = new HashSet<long>();
       foreach (var s in codigos)

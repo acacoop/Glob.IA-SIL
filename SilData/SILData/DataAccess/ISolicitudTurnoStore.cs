@@ -123,6 +123,14 @@ namespace SILData.DataAccess
     public Task<SolicitudTurno?> GetByIdAsync(long id);
 
     /// <summary>
+    /// Versión batch de <see cref="GetByIdAsync"/> (flag <c>Features:AcceptBatchLookup</c>).
+    /// Devuelve las solicitudes existentes indexadas por Id. Ids ≤ 0 se ignoran;
+    /// los inexistentes no aparecen en el diccionario. Consulta en lotes para
+    /// respetar el límite de 1000 expresiones del IN de Oracle (ORA-01795).
+    /// </summary>
+    public Task<Dictionary<long, SolicitudTurno>> GetByIdsAsync(IEnumerable<long> ids);
+
+    /// <summary>
     /// Rechaza una o varias solicitudes en estado Pendiente. Bajo el modelo
     /// "detalle acumulativo":
     /// <list type="bullet">

@@ -885,6 +885,59 @@ namespace SILData.DataAccess
       }
     }
 
+    /// <summary>Tamaño de lote para listas IN (Oracle corta en 1000, ORA-01795).</summary>
+    internal const int TamanioLoteIn = 900;
+
+    /// <summary>Mismas columnas/mapeo que <see cref="GetByIdAsync"/>.</summary>
+    private const string SelectSolicitudTurnoSql = @"
+        SELECT solturnos_id                AS ""Id"",
+               CTACOMP                     AS ""CuentaComprador"",
+               CTAVEND                     AS ""CuentaVendedor"",
+               DEST                        AS ""CuentaDestino"",
+               TIPODEST                    AS ""TipoDestino"",
+               GRANO                       AS ""CodigoGrano"",
+               FECHACREACION               AS ""FechaCreacion"",
+               FECHASOLICITADA             AS ""FechaSolicitado"",
+               FUTURO                      AS ""EsFuturo"",
+               CENTRO                      AS ""CodigoCentro"",
+               OBSERVA                     AS ""Observacion"",
+               CUPO_ID                     AS ""CupoId"",
+               CANTIDAD                    AS ""Cantidad"",
+               CANTIDAD_FUTURO             AS ""CantidadFuturo"",
+               CANTIDAD_ACEPTADA           AS ""CantidadAceptada"",
+               CANTIDAD_FUTURO_ACEPTADA    AS ""CantidadFuturoAceptada"",
+               CANTIDAD_RECHAZADA          AS ""CantidadRechazada"",
+               CANTIDAD_FUTURO_RECHAZADA   AS ""CantidadFuturoRechazada""
+          FROM SOLTURNOS";
+
+    public async Task<Dictionary<long, SolicitudTurno>> GetByIdsAsync(IEnumerable<long> ids)
+    {
+      var resultado = new Dictionary<long, SolicitudTurno>();
+      var lista = (ids ?? Enumerable.Empty<long>()).Where(id => id > 0).Distinct().ToList();
+      if (lista.Count == 0) return resultado;
+
+      string sql = SelectSolicitudTurnoSql + @"
+         WHERE solturnos_id IN :Ids";
+
+      try
+      {
+        using var connection = new OracleConnection(_connectionString);
+        await connection.OpenAsync();
+        foreach (var lote in lista.Chunk(TamanioLoteIn))
+        {
+          var rows = await connection.QueryAsync<SolicitudTurno>(sql, new { Ids = lote });
+          foreach (var row in rows)
+            resultado[row.Id] = row;
+        }
+        return resultado;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error en GetByIdsAsync para {Count} solicitudes", lista.Count);
+        throw;
+      }
+    }
+
     public async Task DeleteAsync(IList<long> solicitudIds)
     {
       if (solicitudIds is null || solicitudIds.Count == 0)

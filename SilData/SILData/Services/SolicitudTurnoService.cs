@@ -27,6 +27,8 @@ namespace SILData.Services
     private readonly ACA.Matching.Engine.IMatchingEngine _matchingEngine;
     private readonly IZonaGeograficaResolver _zonaGeograficaResolver;
     private string? _connectionString;
+    private readonly IConfiguration _configuration;
+    private readonly ICatalogCache? _catalogCache;
     public SolicitudTurnoService(
       ISolicitudTurnoStore solicitudTurnoStore,
       ICuposDisponiblesService cuposDisponiblesService,
@@ -35,9 +37,12 @@ namespace SILData.Services
       IConfiguration configuration,
       ISILCuposStore silCuposStore,
       ACA.Matching.Engine.IMatchingEngine matchingEngine,
-      IZonaGeograficaResolver zonaGeograficaResolver)
+      IZonaGeograficaResolver zonaGeograficaResolver,
+      ICatalogCache? catalogCache = null)
     {
+      _catalogCache = catalogCache;
       _connectionString = configuration.GetConnectionString("SilConnection");
+      _configuration = configuration;
       _solicitudTurnoStore = solicitudTurnoStore;
       _CuposDisponiblesService = cuposDisponiblesService;
       _geographicalAereaService = geographicalAereaService;
@@ -60,6 +65,45 @@ namespace SILData.Services
       return new CupoCatalogoLookup(
         loggerFactory.CreateLogger<CupoCatalogoLookup>(),
         _connectionString);
+    }
+
+    private bool CatalogCacheActivo =>
+      _catalogCache is not null && FeatureFlags.IsEnabled(_configuration, FeatureFlags.CatalogCache);
+
+    /// <summary>
+    /// Puerto → zonas. Con <c>Features:CatalogCache</c> usa IMemoryCache;
+    /// sin el flag llama directo al servicio (camino legacy).
+    /// </summary>
+    private async Task<IEnumerable<ZonaGeograficaView>> ResolverZonasDelPuertoAsync(long cuentaPuerto)
+    {
+      if (CatalogCacheActivo)
+        return await _catalogCache!.GetZonasPorPuertoAsync(cuentaPuerto, _geographicalAereaService.ResolveByDestinoAsync);
+
+      return await _geographicalAereaService.ResolveByDestinoAsync(cuentaPuerto);
+    }
+
+    /// <summary>
+    /// Nombres de vendedor de los cupos. Con <c>Features:CatalogCache</c> usa
+    /// IMemoryCache; sin el flag, camino legacy de <see cref="CupoCatalogoLookup"/>.
+    /// </summary>
+    private async Task<Dictionary<long, string>> ResolverNombresVendedorCuposAsync(
+      CupoCatalogoLookup cupoCatalogo,
+      IEnumerable<string?> codigosVend)
+    {
+      if (!CatalogCacheActivo)
+        return await cupoCatalogo.ResolverNombresVendedorAsync(codigosVend);
+
+      var cuentas = CupoCatalogoLookup.ParseCuentas(codigosVend);
+      if (cuentas.Count == 0) return new Dictionary<long, string>();
+      try
+      {
+        return await _catalogCache!.GetNombresVendedorAsync(cuentas, cupoCatalogo.FetchNombresVendedorAsync);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "ResolverNombresVendedorCuposAsync: falló el batch de {Count} cuentas.", cuentas.Count);
+        return new Dictionary<long, string>();
+      }
     }
 
     public async Task AddRequest(SolicitudTurnoCreate solicitudTurnoCreate)
@@ -498,6 +542,8 @@ namespace SILData.Services
 
     public async Task<ShiftRequestAcceptResult> AcceptRequestsAsync(ShiftRequestAcceptData shiftRequestAcceptData)
     {
+      using var perf = new PerfScope(_logger, "AcceptRequestsAsync");
+
       if (shiftRequestAcceptData == null)
         throw new SilDataException("El cuerpo de la solicitud no puede ser nulo.", StatusCodes.Status400BadRequest);
 
@@ -525,6 +571,7 @@ namespace SILData.Services
       // Si es Condicional, lo registramos para que el front muestre el diálogo.
       var ctxZona = await _zonaGeograficaResolver.ResolverAsync(
         shiftRequestAcceptData.CuposToBeDistributed.Select(c => c.Id));
+      perf.Mark("zonas");
 
       var motivoFallaPorSolicitudId = new Dictionary<long, string>();
       var tipoMatchPorSolicitudId = new Dictionary<long, string>();
@@ -563,6 +610,27 @@ namespace SILData.Services
       // pedida ORIGINAL (de SOLTURNOS.CANTIDAD antes del Accept) para calcular
       // los pendientes en un Accept parcial.
       var cantidadOriginalPorSolicitudId = new Dictionary<long, int>();
+      perf.Mark("matching");
+
+      // Flag Features:AcceptBatchLookup: una sola lectura batch de SOLTURNOS
+      // en lugar de un GetByIdAsync por solicitud (N+1). Si el batch falla,
+      // se cae al lookup individual legacy (mismo resultado que hoy).
+      Dictionary<long, SolicitudTurno>? solicitudesBd = null;
+      if (FeatureFlags.IsEnabled(_configuration, FeatureFlags.AcceptBatchLookup))
+      {
+        try
+        {
+          solicitudesBd = await _solicitudTurnoStore.GetByIdsAsync(
+            shiftRequestAcceptData.ShiftRequest
+              .Where(r => !motivoFallaPorSolicitudId.ContainsKey(r.Id))
+              .Select(r => r.Id));
+        }
+        catch (Exception ex)
+        {
+          _logger.LogWarning(ex, "AcceptRequestsAsync: falló GetByIdsAsync, se usa el lookup individual.");
+          solicitudesBd = null;
+        }
+      }
 
       int cupoIndex = 0;
       foreach (var req in shiftRequestAcceptData.ShiftRequest)
@@ -581,15 +649,23 @@ namespace SILData.Services
         // modelo). Si la consulta falla (solicitud recién eliminada, etc.),
         // caemos a la cantidad del payload como defensa.
         int cantOriginal = cant;
-        try
+        if (solicitudesBd != null)
         {
-          var solBd = await _solicitudTurnoStore.GetByIdAsync(req.Id);
-          if (solBd != null && solBd.Cantidad > 0)
-            cantOriginal = solBd.Cantidad;
+          if (solicitudesBd.TryGetValue(req.Id, out var solBdBatch) && solBdBatch != null && solBdBatch.Cantidad > 0)
+            cantOriginal = solBdBatch.Cantidad;
         }
-        catch
+        else
         {
-          // defensa: usar cantidad del payload
+          try
+          {
+            var solBd = await _solicitudTurnoStore.GetByIdAsync(req.Id);
+            if (solBd != null && solBd.Cantidad > 0)
+              cantOriginal = solBd.Cantidad;
+          }
+          catch
+          {
+            // defensa: usar cantidad del payload
+          }
         }
         cantidadOriginalPorSolicitudId[req.Id] = cantOriginal;
 
@@ -642,11 +718,15 @@ namespace SILData.Services
         });
       }
 
+      perf.Mark("consultaSolicitudes");
+
       await _silCuposStore.UpdateCuposDistributionAsync(updatedCupos);
+      perf.Mark("updateCupos");
 
       // El store aplica la concurrencia optimista y devuelve qué operaciones
       // prosperaron y cuáles fallaron por conflicto (otro operador ya actuó).
       IList<AcceptOperationResult> storeResults = await _solicitudTurnoStore.AcceptRequestsAsync(operations);
+      perf.Mark("storeAccept");
 
       var resultado = new ShiftRequestAcceptResult
       {
@@ -904,6 +984,8 @@ namespace SILData.Services
     /// </remarks>
     public async Task<MatchesResultDto> BuscarMatchesAsync(MatchesFilterDto filter)
     {
+      using var perf = new PerfScope(_logger, "BuscarMatchesAsync");
+
       if (filter is null)
         throw new SilDataException("El filtro no puede ser nulo.", StatusCodes.Status400BadRequest);
 
@@ -936,8 +1018,9 @@ namespace SILData.Services
 
       if (filter.CuentaPuerto is long cp && cp > 0)
       {
-        var zonasDelPuerto = await _geographicalAereaService.ResolveByDestinoAsync(cp);
+        var zonasDelPuerto = await ResolverZonasDelPuertoAsync(cp);
         zonasResueltas = zonasDelPuerto?.Select(z => z.zonaGeoId).ToList() ?? new List<long>();
+        perf.Mark("puertoZonas");
 
         if (zonasResueltas.Count == 0)
         {
@@ -977,6 +1060,7 @@ namespace SILData.Services
                  && !s.EstadoCupo.HasValue // CUPO_ID IS NULL (parent no asignado)
                  && s.CantidadAceptada < s.Cantidad) // aún no cubierta — si CantidadAceptada == Cantidad no hay cupos a asignar
         .ToList();
+      perf.Mark("consultaSolicitudes");
 
       if (todasSolicitudes.Count == 0)
       {
@@ -999,6 +1083,7 @@ namespace SILData.Services
         estadoSil: 0, // El estado del cupo debe ser = 0
         zonaGeograficaId: zonaParaFiltroSolicitudes, // null/0 = sin filtro por zona
         centros: filter.Centros); // centros que el operador puede manipular; vacío = sin filtro
+      perf.Mark("consultaCupos");
 
       if (cuposDisponibles.Count == 0)
       {
@@ -1013,6 +1098,7 @@ namespace SILData.Services
       // para evitar un viaje extra al catálogo desde la UI.
       var ctxZonas = await _zonaGeograficaResolver.ResolverConNombresAsync(
         cuposDisponibles.Select(c => c.Id));
+      perf.Mark("zonas");
 
       // ── Hidratar nombres del CUPO ───────────────────────────────────
       // El nombre del comprador ya viene en la fila de cuposcorre
@@ -1024,8 +1110,9 @@ namespace SILData.Services
       // UI muestra "No informado".
       var cupoCatalogo = BuildCupoCatalogoLookup();
 
-      Dictionary<long, string> nombresVendedor = await cupoCatalogo
-        .ResolverNombresVendedorAsync(cuposDisponibles.Select(c => c.CodVendSIL));
+      Dictionary<long, string> nombresVendedor = await ResolverNombresVendedorCuposAsync(
+        cupoCatalogo, cuposDisponibles.Select(c => c.CodVendSIL));
+      perf.Mark("nombresVendedor");
 
       // ── Evaluar matches con el motor ────────────────────────────────
       var resultado = new MatchesResultDto
@@ -1160,6 +1247,7 @@ namespace SILData.Services
       resultado.Resumen.MatchesParciales = parciales;
       resultado.Resumen.MatchesCondicionales = condicionales;
       resultado.Resumen.Incompatibles = incompatibles;
+      perf.Mark("matching");
 
       _logger.LogInformation(
         "BuscarMatchesAsync: {Solicitudes} solicitudes × {Cupos} cupos ({FechasCupo} fechas distintas) → {Items} items. Directos={D} Parciales={P} Condicionales={C} Incompatibles={I} DescartadosPorFecha={F}.",
@@ -1500,7 +1588,7 @@ namespace SILData.Services
 
       if (filter.CuentaPuerto is long cp && cp > 0)
       {
-        var zonasDelPuerto = await _geographicalAereaService.ResolveByDestinoAsync(cp);
+        var zonasDelPuerto = await ResolverZonasDelPuertoAsync(cp);
         zonasResueltas = zonasDelPuerto?.Select(z => z.zonaGeoId).ToList() ?? new List<long>();
 
         if (zonasResueltas.Count == 0)
@@ -1560,8 +1648,8 @@ namespace SILData.Services
 
       // ── Hidratar nombres del CUPO ───────────────────────────────────
       var cupoCatalogo = BuildCupoCatalogoLookup();
-      Dictionary<long, string> nombresVendedor = await cupoCatalogo
-        .ResolverNombresVendedorAsync(cuposDisponibles.Select(c => c.CodVendSIL));
+      Dictionary<long, string> nombresVendedor = await ResolverNombresVendedorCuposAsync(
+        cupoCatalogo, cuposDisponibles.Select(c => c.CodVendSIL));
 
       // ── Evaluar matches con el motor ────────────────────────────────
       var resultado = new MatchesResultDto
