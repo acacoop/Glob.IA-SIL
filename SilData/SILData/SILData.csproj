@@ -37,4 +37,8 @@
     <Folder Include="Model\SolicitudTurno\ZonaGeografica\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SILData.Tests" />
+  </ItemGroup>
+
 </Project>

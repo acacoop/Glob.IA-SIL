@@ -32,17 +32,22 @@ namespace SILData.Services
     private readonly ACA.Matching.Engine.IMatchingEngine _matchingEngine;
     private readonly IZonaGeograficaResolver _zonaGeograficaResolver;
     private readonly string? _connectionString;
+    private readonly IConfiguration _configuration;
+    private readonly ICatalogCache? _catalogCache;
 
     public SolicitudTurnoMatchingV2Service(
       ISolicitudTurnoStore solicitudTurnoStore,
       ILogger<SolicitudTurnoMatchingV2Service> logger,
       IConfiguration configuration,
       ACA.Matching.Engine.IMatchingEngine matchingEngine,
-      IZonaGeograficaResolver zonaGeograficaResolver)
+      IZonaGeograficaResolver zonaGeograficaResolver,
+      ICatalogCache? catalogCache = null)
     {
       _solicitudTurnoStore = solicitudTurnoStore;
       _logger = logger;
       _connectionString = configuration.GetConnectionString("SilConnection");
+      _configuration = configuration;
+      _catalogCache = catalogCache;
       _matchingEngine = matchingEngine;
       _zonaGeograficaResolver = zonaGeograficaResolver;
     }
@@ -62,6 +67,8 @@ namespace SILData.Services
     /// </summary>
     public async Task<MatchesResultDto> BuscarMatchesV2Async(MatchesFilterDto filter)
     {
+      using var perf = new PerfScope(_logger, "BuscarMatchesV2Async");
+
       if (filter is null)
         throw new SilDataException("El filtro no puede ser nulo.", StatusCodes.Status400BadRequest);
 
@@ -81,8 +88,17 @@ namespace SILData.Services
       long comprador = filter.CuentaComprador!.Value;
       string puerto = filter.CuentaPuerto!.Value.ToString();
 
+      bool optimizada = FeatureFlags.IsEnabled(_configuration, FeatureFlags.DistribucionV2Optimizada);
+      bool rangoVacio = false;
+      if (optimizada)
+      {
+        (fechaDesde, fechaHasta, rangoVacio) = AcotarRangoFechas(fechaDesde, fechaHasta, DateTime.Now.Date);
+      }
+
       // 1) Traer los pares (cupo, solicitud) candidatos vía INNER JOIN nativo.
-      var pares = (await _solicitudTurnoStore.GetCuposConMatchesAsync(
+      var pares = rangoVacio
+        ? new List<CupoConSolicitudMatchDto>()
+        : (await _solicitudTurnoStore.GetCuposConMatchesAsync(
         filter.CodigoGrano,
         vendedor,
         comprador,
@@ -91,6 +107,7 @@ namespace SILData.Services
         filter.Codcentrodist,
         fechaDesde,
         fechaHasta)).ToList();
+      perf.Mark("consultaCuposSolicitudes");
 
       var resultado = new MatchesResultDto
       {
@@ -124,13 +141,33 @@ namespace SILData.Services
       // 2) Resolver zonas geográficas para los cupos involucrados (en un solo
       //    batch) — el motor lo necesita para evaluar DestinoRule cuando
       //    TIPODEST = ZonaPortuaria.
-      var ctxZonas = await _zonaGeograficaResolver.ResolverConNombresAsync(
-        pares.Select(p => p.CupoId).Distinct());
-
       // 3) Hidratar nombres del vendedor (el resto de los nombres ya viene en
       //    cada par: NombreComprador, NombrePuerto, NombreGrano).
-      var nombresVendedor = await ResolverNombresVendedorAsync(
-        pares.Select(p => p.CupoVendedor));
+      ACA.Matching.Contexto.IContextoZonasConNombres ctxZonas;
+      Dictionary<long, string> nombresVendedor;
+      if (optimizada)
+      {
+        // Flag DistribucionV2Optimizada: ambas consultas son independientes
+        // (cada una abre su propia conexión), así que se ejecutan en paralelo.
+        var zonasTask = _zonaGeograficaResolver.ResolverConNombresAsync(
+          pares.Select(p => p.CupoId).Distinct().ToList());
+        var nombresTask = ResolverNombresVendedorFlagAsync(
+          pares.Select(p => p.CupoVendedor).ToList());
+        await Task.WhenAll(zonasTask, nombresTask);
+        ctxZonas = await zonasTask;
+        nombresVendedor = await nombresTask;
+        perf.Mark("zonasYNombres");
+      }
+      else
+      {
+        ctxZonas = await _zonaGeograficaResolver.ResolverConNombresAsync(
+          pares.Select(p => p.CupoId).Distinct());
+        perf.Mark("zonas");
+
+        nombresVendedor = await ResolverNombresVendedorFlagAsync(
+          pares.Select(p => p.CupoVendedor));
+        perf.Mark("nombresVendedor");
+      }
 
       // 4) Clasificar cada par con el motor. Los pares ya cumplen las
       //    invariantes obligatorias; aquí sólo emitimos el MatchType.
@@ -209,6 +246,7 @@ namespace SILData.Services
       resultado.Resumen.MatchesParciales = parciales;
       resultado.Resumen.MatchesCondicionales = condicionales;
       resultado.Resumen.Incompatibles = incompatibles;
+      perf.Mark("matching");
 
       _logger.LogInformation(
         "BuscarMatchesV2Async: {Pares} pares (cupos={Cupos}, solicitudes={Sols}) → Directos={D} Parciales={P} Condicionales={C} Incompatibles={I}.",
@@ -259,6 +297,65 @@ namespace SILData.Services
         Destino: par.SolicitudDestino?.ToString(),
         TipoDestino: tipoDestino,
         Observaciones: par.Observacion);
+    }
+
+    /// <summary>
+    /// Flag <c>Features:DistribucionV2Optimizada</c>: acota el rango de fechas
+    /// que manda el cliente (hoy llega 01/01/2001–01/12/2200) a
+    /// [hoy - MaxDiasAtras, hoy + MaxDiasAdelante]. Cada límite sólo aplica
+    /// si está configurado con un valor &gt; 0 (<c>Features:DistribucionV2MaxDiasAtras</c>,
+    /// <c>Features:DistribucionV2MaxDiasAdelante</c>); por defecto NO se acota.
+    /// Devuelve <c>vacio=true</c> si tras acotar el rango queda invertido.
+    /// </summary>
+    internal (DateTime Desde, DateTime Hasta, bool Vacio) AcotarRangoFechas(DateTime desde, DateTime hasta, DateTime hoy)
+    {
+      int maxAtras = FeatureFlags.GetInt(_configuration, FeatureFlags.DistribucionV2MaxDiasAtras, 0);
+      int maxAdelante = FeatureFlags.GetInt(_configuration, FeatureFlags.DistribucionV2MaxDiasAdelante, 0);
+
+      var nuevoDesde = desde;
+      var nuevoHasta = hasta;
+      if (maxAtras > 0 && nuevoDesde < hoy.AddDays(-maxAtras))
+        nuevoDesde = hoy.AddDays(-maxAtras);
+      if (maxAdelante > 0 && nuevoHasta > hoy.AddDays(maxAdelante))
+        nuevoHasta = hoy.AddDays(maxAdelante);
+
+      if (nuevoDesde != desde || nuevoHasta != hasta)
+      {
+        _logger.LogInformation(
+          "BuscarMatchesV2Async: rango de fechas acotado de {Desde:d}–{Hasta:d} a {NuevoDesde:d}–{NuevoHasta:d}.",
+          desde, hasta, nuevoDesde, nuevoHasta);
+      }
+
+      return (nuevoDesde, nuevoHasta, nuevoDesde > nuevoHasta);
+    }
+
+    /// <summary>
+    /// Nombres de vendedor: con <c>Features:CatalogCache</c> usa IMemoryCache;
+    /// sin el flag, el camino legacy <see cref="ResolverNombresVendedorAsync"/>.
+    /// </summary>
+    private async Task<Dictionary<long, string>> ResolverNombresVendedorFlagAsync(IEnumerable<long?> codigosVend)
+    {
+      if (_catalogCache is null || !FeatureFlags.IsEnabled(_configuration, FeatureFlags.CatalogCache))
+        return await ResolverNombresVendedorAsync(codigosVend);
+
+      var cuentas = new HashSet<long>();
+      foreach (var c in codigosVend)
+      {
+        if (c.HasValue && c.Value > 0) cuentas.Add(c.Value);
+      }
+      if (cuentas.Count == 0) return new Dictionary<long, string>();
+
+      try
+      {
+        using var loggerFactory = LoggerFactory.Create(b => { });
+        var lookup = new CupoCatalogoLookup(loggerFactory.CreateLogger<CupoCatalogoLookup>(), _connectionString);
+        return await _catalogCache.GetNombresVendedorAsync(cuentas, lookup.FetchNombresVendedorAsync);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "ResolverNombresVendedorFlagAsync: falló el batch de {Count} cuentas.", cuentas.Count);
+        return new Dictionary<long, string>();
+      }
     }
 
     /// <summary>

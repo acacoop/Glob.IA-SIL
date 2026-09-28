@@ -7,6 +7,7 @@ using Shared.ClassShared.Interfaces;
 using SILData.DataAccess.Map_OracleToSql;
 using SILData.Model.SolicitudTurno;
 using SILData.Model;
+using SILData.Services;
 using System.Collections.Generic;
 using System.Data;
 using System.Reflection;
@@ -190,14 +191,30 @@ namespace SILData.DataAccess
       {
         string executableLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         string queryLocation = Path.Combine(executableLocation, _configuration[KeyForQuery]);
-        StreamReader fileReader = new StreamReader(queryLocation);
-        //StreamReader fileReader = new StreamReader(_configuration["QueryCupposCorre"]);
-        string query = fileReader.ReadToEnd();
+        string query;
+        bool sqlFileCache = FeatureFlags.IsEnabled(_configuration, FeatureFlags.SqlFileCache);
+        if (sqlFileCache)
+        {
+          query = SqlFileCache.GetOrLoad(queryLocation);
+        }
+        else
+        {
+          StreamReader fileReader = new StreamReader(queryLocation);
+          //StreamReader fileReader = new StreamReader(_configuration["QueryCupposCorre"]);
+          query = fileReader.ReadToEnd();
+        }
         var dictionary = new Dictionary<string, object>();
         dictionary.Add("@fechaDesde", fechaDesde.Date.ToString("dd/MM/yyyy"));
         dictionary.Add("@fechaHasta", fechaHasta.Date.ToString("dd/MM/yyyy"));
-        SqlMapper.AddTypeHandler(new BooleanTypeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        if (sqlFileCache)
+        {
+          SqlFileCache.EnsureTypeHandlersRegistered(_logger);
+        }
+        else
+        {
+          SqlMapper.AddTypeHandler(new BooleanTypeHandler());
+          SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        }
         using (OracleConnection connection = new OracleConnection(_connectionString))
         {
           await connection.OpenAsync();
@@ -219,14 +236,30 @@ namespace SILData.DataAccess
       {
         string executableLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         string queryLocation = Path.Combine(executableLocation, _configuration["QueryCupposStop"]);
-        StreamReader fileReader = new StreamReader(queryLocation);
-        //StreamReader fileReader = new StreamReader(_configuration["QueryCupposStop"]);
-        string query = fileReader.ReadToEnd();
+        string query;
+        bool sqlFileCache = FeatureFlags.IsEnabled(_configuration, FeatureFlags.SqlFileCache);
+        if (sqlFileCache)
+        {
+          query = SqlFileCache.GetOrLoad(queryLocation);
+        }
+        else
+        {
+          StreamReader fileReader = new StreamReader(queryLocation);
+          //StreamReader fileReader = new StreamReader(_configuration["QueryCupposStop"]);
+          query = fileReader.ReadToEnd();
+        }
         var dictionary = new Dictionary<string, object>();
         dictionary.Add("@fechaDesde", fechaDesde.ToString("dd/MM/yyyy"));
         dictionary.Add("@fechaHasta", fechaHasta.ToString("dd/MM/yyyy"));
-        SqlMapper.AddTypeHandler(new BooleanTypeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        if (sqlFileCache)
+        {
+          SqlFileCache.EnsureTypeHandlersRegistered(_logger);
+        }
+        else
+        {
+          SqlMapper.AddTypeHandler(new BooleanTypeHandler());
+          SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        }
         using (OracleConnection connection = new OracleConnection(_connectionString))
         {
           await connection.OpenAsync();
@@ -277,7 +310,10 @@ namespace SILData.DataAccess
 
         string executableLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         string queryLocation = Path.Combine(executableLocation, _configuration[KeyForQuery]);
-        string query = await File.ReadAllTextAsync(queryLocation);
+        bool sqlFileCache = FeatureFlags.IsEnabled(_configuration, FeatureFlags.SqlFileCache);
+        string query = sqlFileCache
+          ? SqlFileCache.GetOrLoad(queryLocation)
+          : await File.ReadAllTextAsync(queryLocation);
 
         var parameters = new DynamicParameters();
 
@@ -290,8 +326,15 @@ namespace SILData.DataAccess
         parameters.Add("@destinos", ToStringConcat(filters.Destinos));
         parameters.Add("@centros", ToStringConcat(filters.Centros));
 
-        SqlMapper.AddTypeHandler(new BooleanTypeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        if (sqlFileCache)
+        {
+          SqlFileCache.EnsureTypeHandlersRegistered(_logger);
+        }
+        else
+        {
+          SqlMapper.AddTypeHandler(new BooleanTypeHandler());
+          SqlMapper.AddTypeHandler(new DateTimeTypeHandler(_logger));
+        }
 
         using var connection = new OracleConnection(_connectionString);
         await connection.OpenAsync();
