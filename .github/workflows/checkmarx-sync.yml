@@ -1,0 +1,19 @@
+name: Sync Repository to Checkmarx
+
+on:
+  push:
+    branches:
+      - test
+      - Test
+      - TEST
+      - main
+
+  workflow_dispatch:
+
+jobs:
+  sync:
+    uses: acacoop/Security-Workflows/.github/workflows/repository-sync.yml@main
+    with:
+      allowed_source_branch: test, main
+    secrets:
+      SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
